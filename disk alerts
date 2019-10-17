@@ -1,0 +1,90 @@
+Function Get-DiskSpace 
+{ 
+    
+     Get-WmiObject -Class win32_volume -cn $ServerName |
+       Select-Object @{LABEL='Hostname';EXPRESSION={$s}}, 
+         driveletter, label,
+         @{LABEL="Capacity (GB)"; Expression = {"{0:N2}" -f ($_.capacity / 1GB)}}, 
+         @{LABEL='Free Space (GB)';EXPRESSION={"{0:N2}" -f ($_.freespace/1GB)}},
+         <# @{LABEL="Percent Free (%)";Expression = {"{0:N2}" -f (($_.FreeSpace / $_.Capacity)*100) }},#> 
+         @{LABEL="Percent Usage (%)";Expression = {"{0:N2}" -f ((($_.Capacity - $_.freespace)/$_.Capacity)*100) }}           
+}
+
+
+$Result = @()
+Foreach($ServerName in $ServerList)
+{
+	$drives = get-wmiobject -ComputerName $ServerName -Class win32_LogicalDisk
+	
+Foreach ($drive in $drives){
+
+	$disk = Get-DiskSpace -servers $drive
+	
+	$Result += New-Object PSObject -Property @{
+    
+	    Hostname = $ServerName
+		DriveLetter = $disk.driveletter
+		Label = $disk.label
+		CapacityGB = $disk."Capacity (GB)"
+		FreeSpaceGB = $disk."Free Space (GB)"
+		PerecntUsage = $disk."Percent Usage (%)"
+		
+	}
+  }
+}
+
+
+if($Result -ne $null)
+{
+	$HTML = '<style type="text/css">
+	#Header{font-family:"Trebuchet MS", Arial, Helvetica, sans-serif;width:100%;border-collapse:collapse;}
+	#Header td, #Header th {font-size:14px;border:1px solid #006400;padding:3px 7px 2px 7px;}
+	#Header th {font-size:14px;text-align:left;padding-top:5px;padding-bottom:4px;background-color:#006400;color:#fff;}
+	#Header tr.alt td {color:#000;background-color:#EAF2D3;}
+	</Style>'
+
+    $HTML += "<HTML><BODY><Table border=1 cellpadding=0 cellspacing=0 id=Header>
+		<TR>
+			<TH><B>Hostname</B></TH>
+			<TH><B>Drive Letter</B></TD>
+			<TH><B>Label</B></TH>
+			<TH><B>Capacity (GB)</B></TH>
+			<TH><B>Free Space (GB)</B></TD>
+			<TH><B>Perecnt Usage (%)</B></TH>
+			
+		</TR>"
+    Foreach($Entry in $Result)
+    {
+        if($Entry."PercentUsage" -ge "90")
+		{
+			$HTML += "<TR bgColor=Red>"
+		}
+		else
+		{
+			$HTML += "<TR>"
+		}
+		$HTML += "
+						<TD>$($Entry.Hostname)</TD>
+						<TD>$($Entry.DriveLetter)</TD>
+						<TD>$($Entry.Label)</TD>
+						<TD>$($Entry.CapacityGB)</TD>
+						<TD>$($Entry.FreeSpaceGB)</TD>
+						<TD>$($Entry.PerecntUsage)</TD>
+						
+					</TR>"
+    }
+    $HTML += "</Table></BODY></HTML>"
+
+	$HTML | Out-File $OutputFile
+}
+
+
+
+$body = [System.IO.File]::ReadAllText($OutputFile)
+
+Send-MailMessage -To $to -From $from -Subject "Daily Checks - Regional Disk Space" -Body $body -BodyAsHtml -SmtpServer $smtp
+
+
+start-sleep -s 30
+
+Remove-Item -Path $OutputFile -Force
